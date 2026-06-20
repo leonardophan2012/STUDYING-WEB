@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="grade-screen">
+    <p class="page-question">What's your grade?</p>
+    <div class="grade-list">
+        {% for grade in grades %}
+            {% set grade_number = loop.index %}
+            <a class="grade-row" href="{{ url_for('subject_page', subject=selected_subject, grade=grade_number) }}">
+                {{ grade }}
+            </a>
+        {% endfor %}
+    </div>
+</section>
+{% endblock %}

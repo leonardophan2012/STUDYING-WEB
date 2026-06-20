@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="home-grid">
+    {% for key, item in subjects.items() %}
+        <a class="small-card" href="{{ url_for('grades', subject=key) }}">
+            {{ item.name }}
+        </a>
+    {% endfor %}
+</section>
+
+<section class="level-grid">
+    {% for level in levels %}
+        <a class="level-card" href="{{ url_for('grades') }}">
+            <span>{{ level.name }}</span>
+            <strong>{{ level.price }}</strong>
+            <small>{{ level.grades }}</small>
+        </a>
+    {% endfor %}
+</section>
+{% endblock %}

@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="auth-page">
+    <h1>Resend Verification</h1>
+    <form method="POST" class="auth-form">
+        <label>Email</label>
+        <input type="email" name="email" required>
+        <button type="submit">Send Again</button>
+    </form>
+</section>
+{% endblock %}

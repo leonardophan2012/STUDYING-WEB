@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="subject-page" data-subject="{{ subject_key }}">
+    <div class="subject-title-row">
+        <a href="{{ url_for('home') }}">Home</a>
+        <h1>{{ subjects[subject_key].name }} - Grade {{ grade }}</h1>
+        <a href="{{ url_for('tips', subject=subject_key) }}">Tips</a>
+    </div>
+
+    <p class="subject-description">{{ subjects[subject_key].description }}</p>
+
+    <section class="lesson-grid">
+        <article class="content-card"></article>
+        <article class="content-card"></article>
+        <article class="content-card"></article>
+        <article class="content-card"></article>
+        <article class="content-card"></article>
+        <article class="content-card"></article>
+    </section>
+
+    <section class="api-panel">
+        <div class="panel-head">
+            <h2>Practice Questions from API</h2>
+            <button id="loadQuizBtn" data-subject="{{ subject_key }}">Load Questions</button>
+        </div>
+        <div id="quizStatus" class="quiz-status">Click the button to load questions.</div>
+        <div id="quizList" class="quiz-list"></div>
+    </section>
+</section>
+{% endblock %}

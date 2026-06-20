@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+
+{% block content %}
+<section class="tips-page">
+    <div class="tips-header">Tips for Learning {{ subjects[subject_key].name }}</div>
+    <div class="tips-square"></div>
+
+    <div class="tips-list">
+        <div>1. Study for a short time every day.</div>
+        <div>2. Write examples in your own words.</div>
+        <div>3. Practice questions after each lesson.</div>
+        <div>4. Review your mistakes before moving on.</div>
+    </div>
+
+    <a class="plain-button" href="{{ url_for('grades', subject=subject_key) }}">Choose Grade</a>
+</section>
+{% endblock %}
