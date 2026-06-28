@@ -87,33 +87,50 @@ FALLBACK_QUESTIONS = {
 
 
 def login_required(view_function):
-    @wraps(view_function)
+    """Decorator that blocks a route unless the user is logged in.
+
+    Guests are redirected to the login page, and the page they tried to
+    reach is saved in the `next` query param so they return there afterward.
+    """
+    @wraps(view_function)  # preserve the original view's name/metadata for Flask
     def wrapper(*args, **kwargs):
-        if not session.get("user_id"):
+        if not session.get("user_id"):  # no user id in session => not logged in
             flash("Please login first.", "error")
             return redirect(url_for("login", next=request.path))
-        return view_function(*args, **kwargs)
+        return view_function(*args, **kwargs)  # logged in: run the real view
     return wrapper
 
 
 def get_serializer():
+    """Build a signer used to create/verify tamper-proof, time-limited tokens."""
     return URLSafeTimedSerializer(app.config["SECRET_KEY"])
 
 
 def make_verify_token(email):
+    """Encode an email into a signed token used inside the verification link."""
     return get_serializer().dumps(email, salt="email-verification")
 
 
 def read_verify_token(token):
+    """Decode a verification token back into the email.
+
+    Raises SignatureExpired if it is too old, or BadSignature if tampered with.
+    """
     return get_serializer().loads(
         token,
         salt="email-verification",
-        max_age=app.config["TOKEN_MAX_AGE_SECONDS"],
+        max_age=app.config["TOKEN_MAX_AGE_SECONDS"],  # enforce link expiry
     )
 
 
 def send_verification_email(email, username):
+    """Build and send the account-verification email.
+
+    Returns True if sent. If SMTP is not configured or fails, the link is
+    printed to the terminal instead and False is returned.
+    """
     token = make_verify_token(email)
+    # _external=True builds a full http(s) URL that works inside an email
     verify_url = url_for("verify_email", token=token, _external=True)
 
     subject = "Verify your School Subjects account"
@@ -127,12 +144,14 @@ This link expires in 24 hours.
 If you did not register, ignore this email.
 """
 
+    # Dev fallback: with no SMTP credentials, just print the link
     if not app.config["SMTP_USER"] or not app.config["SMTP_PASSWORD"]:
         print("\n--- EMAIL NOT SENT: SMTP is not configured ---")
         print(f"Verification link for {email}: {verify_url}")
         print("--------------------------------------------\n")
         return False
 
+    # Compose the email message
     message = EmailMessage()
     message["Subject"] = subject
     message["From"] = app.config["MAIL_FROM"]
@@ -140,13 +159,14 @@ If you did not register, ignore this email.
     message.set_content(body)
 
     try:
-        context = ssl.create_default_context()
+        context = ssl.create_default_context()  # secure TLS settings
         with smtplib.SMTP(app.config["SMTP_HOST"], app.config["SMTP_PORT"], timeout=15) as server:
-            server.starttls(context=context)
+            server.starttls(context=context)  # upgrade to an encrypted connection
             server.login(app.config["SMTP_USER"], app.config["SMTP_PASSWORD"])
             server.send_message(message)
         return True
     except (socket.gaierror, smtplib.SMTPException, OSError) as error:
+        # On any network/SMTP failure, log it and fall back to the printed link
         print("\n--- EMAIL SEND FAILED ---")
         print("Reason:", error)
         print(f"Verification link for {email}: {verify_url}")
@@ -155,21 +175,24 @@ If you did not register, ignore this email.
 
 
 def get_current_user():
+    """Fetch the logged-in user's record from the database (or None)."""
     user_id = session.get("user_id")
     if not user_id:
         return None
 
     connection = get_db_connection()
-    cursor = connection.cursor(dictionary=True)
+    cursor = connection.cursor(dictionary=True)  # rows returned as dicts
+    # Parameterized query (%s) prevents SQL injection
     cursor.execute("SELECT id, username, email, is_verified FROM users WHERE id = %s", (user_id,))
     user = cursor.fetchone()
-    cursor.close()
-    connection.close()
+    cursor.close()       # always release the cursor
+    connection.close()   # and the connection
     return user
 
 
 @app.context_processor
 def inject_common_data():
+    """Expose `current_user` and `subjects` to every template automatically."""
     return {
         "current_user": get_current_user(),
         "subjects": SUBJECTS,
@@ -178,24 +201,28 @@ def inject_common_data():
 
 @app.route("/")
 def home():
+    """Public landing page showing the pricing levels."""
     return render_template("home.html", levels=LEVELS, title="Home")
 
 
 @app.route("/contact")
 def contact():
+    """Static Contact Us page."""
     return render_template("contact.html", title="Contact Us")
 
 
 @app.route("/about")
 def about():
+    """Static About Us page."""
     return render_template("about.html", title="About Us")
 
 
 @app.route("/grades")
 @login_required
 def grades():
+    """Grade picker page; defaults to math when the subject is missing/invalid."""
     subject = request.args.get("subject", "math").lower()
-    if subject not in SUBJECTS:
+    if subject not in SUBJECTS:  # guard against unknown subjects
         subject = "math"
     return render_template("grades.html", grades=GRADE_LABELS, selected_subject=subject, title="Choose Grade")
 
@@ -203,11 +230,12 @@ def grades():
 @app.route("/subject/<subject>/<int:grade>")
 @login_required
 def subject_page(subject, grade):
+    """Show a specific subject + grade, validating both before rendering."""
     subject = subject.lower()
-    if subject not in SUBJECTS:
+    if subject not in SUBJECTS:  # unknown subject -> back home
         flash("Subject not found.", "error")
         return redirect(url_for("home"))
-    if grade < 1 or grade > 12:
+    if grade < 1 or grade > 12:  # grades are only valid from 1 to 12
         flash("Grade not found.", "error")
         return redirect(url_for("grades", subject=subject))
     return render_template("subject.html", subject_key=subject, grade=grade, title=SUBJECTS[subject]["name"])
@@ -216,6 +244,7 @@ def subject_page(subject, grade):
 @app.route("/tips")
 @login_required
 def tips():
+    """Learning tips page for the chosen subject (defaults to math)."""
     subject = request.args.get("subject", "math").lower()
     if subject not in SUBJECTS:
         subject = "math"
@@ -225,29 +254,40 @@ def tips():
 @app.route("/dashboard")
 @login_required
 def dashboard():
+    """The logged-in user's home dashboard."""
     return render_template("dashboard.html", title="Dashboard")
 
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
+    """Handle new user sign-up.
+
+    GET shows the form; POST validates input, creates the (unverified) user,
+    and emails a verification link.
+    """
     if request.method == "POST":
+        # Read and normalize the submitted fields
         username = request.form.get("username", "").strip()
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
         confirm_password = request.form.get("confirm_password", "")
 
+        # Validation 1: required fields must be present
         if not username or not email or not password:
             flash("Please fill in all required fields.", "error")
             return render_template("register.html", title="Join Our Community")
 
+        # Validation 2: the two passwords must match
         if password != confirm_password:
             flash("Passwords do not match.", "error")
             return render_template("register.html", title="Join Our Community")
 
+        # Never store the raw password — store a salted hash
         password_hash = generate_password_hash(password)
 
         connection = get_db_connection()
         cursor = connection.cursor(dictionary=True)
+        # Reject duplicate emails
         cursor.execute("SELECT id FROM users WHERE email = %s", (email,))
         existing_user = cursor.fetchone()
 
@@ -257,14 +297,16 @@ def register():
             flash("This email is already registered.", "error")
             return render_template("register.html", title="Join Our Community")
 
+        # Insert the new user as unverified (is_verified = 0)
         cursor.execute(
             "INSERT INTO users (username, email, password_hash, is_verified) VALUES (%s, %s, %s, 0)",
             (username, email, password_hash),
         )
-        connection.commit()
+        connection.commit()  # persist the new row
         cursor.close()
         connection.close()
 
+        # Try to send the verification email and flash the matching message
         email_sent = send_verification_email(email, username)
         if email_sent:
             flash("Account created. Please check your email to verify your account.", "success")
@@ -277,12 +319,13 @@ def register():
 
 @app.route("/verify/<token>")
 def verify_email(token):
+    """Verify an account from the emailed token and mark the user verified."""
     try:
         email = read_verify_token(token)
-    except SignatureExpired:
+    except SignatureExpired:  # link too old
         flash("Verification link expired. Please request a new one.", "error")
         return redirect(url_for("resend_verification"))
-    except BadSignature:
+    except BadSignature:  # link invalid / tampered with
         flash("Invalid verification link.", "error")
         return redirect(url_for("login"))
 
@@ -291,12 +334,13 @@ def verify_email(token):
     cursor.execute("SELECT id, is_verified FROM users WHERE email = %s", (email,))
     user = cursor.fetchone()
 
-    if not user:
+    if not user:  # token valid, but the account no longer exists
         cursor.close()
         connection.close()
         flash("Account not found.", "error")
         return redirect(url_for("register"))
 
+    # Only update when not already verified
     if not user["is_verified"]:
         cursor.execute(
             "UPDATE users SET is_verified = 1, verified_at = CURRENT_TIMESTAMP WHERE email = %s",
@@ -312,6 +356,7 @@ def verify_email(token):
 
 @app.route("/resend-verification", methods=["GET", "POST"])
 def resend_verification():
+    """Let users request a fresh verification email."""
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()
         connection = get_db_connection()
@@ -321,11 +366,11 @@ def resend_verification():
         cursor.close()
         connection.close()
 
-        if not user:
+        if not user:  # no account with that email
             flash("Email not found.", "error")
-        elif user["is_verified"]:
+        elif user["is_verified"]:  # nothing to resend
             flash("This account is already verified.", "success")
-        else:
+        else:  # resend the verification link
             email_sent = send_verification_email(email, user["username"])
             if email_sent:
                 flash("Verification email sent.", "success")
@@ -338,6 +383,7 @@ def resend_verification():
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
+    """Authenticate the user and start a session."""
     if request.method == "POST":
         email = request.form.get("email", "").strip().lower()
         password = request.form.get("password", "")
@@ -349,17 +395,20 @@ def login():
         cursor.close()
         connection.close()
 
+        # Generic message hides whether the email or the password was wrong
         if not user or not check_password_hash(user["password_hash"], password):
             flash("Invalid email or password.", "error")
             return render_template("login.html", title="Login")
 
+        # Block unverified accounts and offer to resend the link
         if not user["is_verified"]:
             flash("Please verify your email before logging in.", "error")
             return redirect(url_for("resend_verification"))
 
+        # Success: store identity in the session
         session["user_id"] = user["id"]
         session["username"] = user["username"]
-        next_page = request.args.get("next")
+        next_page = request.args.get("next")  # honor the saved destination
         return redirect(next_page or url_for("dashboard"))
 
     return render_template("login.html", title="Login")
@@ -367,6 +416,7 @@ def login():
 
 @app.route("/logout")
 def logout():
+    """Clear the session and return to the home page."""
     session.clear()
     flash("Logged out successfully.", "success")
     return redirect(url_for("home"))
@@ -375,29 +425,36 @@ def logout():
 @app.route("/api/subject/<subject>/quiz")
 @login_required
 def api_subject_quiz(subject):
+    """JSON quiz endpoint.
+
+    Fetches questions from Open Trivia DB for the subject. If the API fails
+    or returns nothing, returns local FALLBACK_QUESTIONS instead.
+    """
     subject = subject.lower()
-    if subject not in SUBJECTS:
+    if subject not in SUBJECTS:  # unknown subject -> 404 JSON error
         return jsonify({"error": "Subject not found"}), 404
 
     category_id = SUBJECTS[subject]["api_category"]
     amount = request.args.get("amount", 6, type=int)
-    amount = max(1, min(amount, 10))
+    amount = max(1, min(amount, 10))  # clamp to a safe range (1–10)
 
     try:
+        # Call the external trivia API
         response = requests.get(
             f"{app.config['OPENTDB_BASE_URL']}/api.php",
             params={"amount": amount, "category": category_id, "type": "multiple"},
             timeout=10,
         )
-        response.raise_for_status()
+        response.raise_for_status()  # raise on HTTP error status codes
         data = response.json()
         questions = []
 
         for item in data.get("results", []):
+            # The API returns HTML-encoded text, so unescape it
             correct_answer = html.unescape(item.get("correct_answer", ""))
             answers = [html.unescape(answer) for answer in item.get("incorrect_answers", [])]
             answers.append(correct_answer)
-            random.shuffle(answers)
+            random.shuffle(answers)  # so the correct answer isn't always last
 
             questions.append({
                 "question": html.unescape(item.get("question", "")),
@@ -407,11 +464,12 @@ def api_subject_quiz(subject):
                 "source": "Open Trivia DB",
             })
 
-        if questions:
+        if questions:  # only return when we actually built some
             return jsonify({"subject": SUBJECTS[subject]["name"], "questions": questions})
     except requests.RequestException as error:
-        print("OpenTDB API failed:", error)
+        print("OpenTDB API failed:", error)  # log and fall through to fallback
 
+    # Fallback path: serve the built-in questions
     return jsonify({
         "subject": SUBJECTS[subject]["name"],
         "questions": FALLBACK_QUESTIONS.get(subject, []),
